@@ -1,4 +1,8 @@
 require("dotenv").config();
+
+// Múi giờ cho cron (7h chúc buổi sáng). Ví dụ: Asia/Ho_Chi_Minh (VN), UTC, America/New_York
+process.env.TZ = process.env.CRON_TZ || process.env.TZ || "Asia/Ho_Chi_Minh";
+
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cron = require("node-cron");
@@ -53,10 +57,10 @@ async function askGemini(prompt) {
   return "⚠ AI hiện không khả dụng. Thử lại sau nhé!";
 }
 
-// ===== Chúc buổi sáng 7h (T2-T6) =====
-cron.schedule("0 7 * * 1-5", async () => {
+// ===== Gửi chúc buổi sáng (dùng cho cron + slash command) =====
+async function sendGoodMorning() {
   const channel = await client.channels.fetch(process.env.CHANNEL_ID);
-  if (!channel) return;
+  if (!channel) return null;
 
   const message = await askGemini(
     "Viết một lời chúc buổi sáng tích cực, ngắn gọn, truyền động lực bằng tiếng Việt."
@@ -68,11 +72,18 @@ cron.schedule("0 7 * * 1-5", async () => {
     .setDescription(`<@${process.env.USER_ID}>\n\n${message}`)
     .setTimestamp();
 
-  channel.send({ embeds: [embed] });
+  await channel.send({ embeds: [embed] });
+  return true;
+}
+
+// ===== Cron chúc buổi sáng 7h (T2–CN, mỗi ngày) =====
+cron.schedule("0 7 * * *", async () => {
+  await sendGoodMorning();
 });
 
 client.once("ready", () => {
   console.log(`Bot online: ${client.user.tag}`);
+  console.log(`Cron "chúc buổi sáng": 7h hàng ngày (múi giờ: ${process.env.TZ})`);
 });
 
 // ===== Slash command =====
@@ -90,6 +101,23 @@ client.on("interactionCreate", async interaction => {
     } catch (err) {
       console.error(err);
       await interaction.editReply("⚠ AI đang bận, thử lại sau nhé!");
+    }
+    return;
+  }
+
+  if (interaction.commandName === "goodmorning") {
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const sent = await sendGoodMorning();
+      if (sent) {
+        await interaction.editReply("✅ Đã gửi chúc buổi sáng vào channel!");
+      } else {
+        await interaction.editReply("⚠ Không tìm thấy channel, kiểm tra CHANNEL_ID.");
+      }
+    } catch (err) {
+      console.error(err);
+      await interaction.editReply("⚠ Gửi thất bại, thử lại sau nhé!");
     }
   }
 });

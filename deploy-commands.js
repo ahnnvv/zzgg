@@ -9,7 +9,10 @@ const commands = [
       option.setName("question")
         .setDescription("Câu hỏi của bạn")
         .setRequired(true)
-    )
+    ),
+  new SlashCommandBuilder()
+    .setName("goodmorning")
+    .setDescription("Gửi chúc buổi sáng ngay (không cần đợi 7h)")
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
