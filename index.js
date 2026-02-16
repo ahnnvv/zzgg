@@ -30,6 +30,17 @@ function getRandomTopic() {
   return topics[Math.floor(Math.random() * topics.length)];
 }
 
+/** Nếu AI trả về nhiều câu (list), chỉ lấy 1 câu ngẫu nhiên */
+function pickOneLine(text) {
+  const lines = text
+    .split(/\n+/)
+    .map(s => s.replace(/^\s*\d+[.)]\s*/, "").trim())
+    .filter(s => s.length > 15 && !s.startsWith("http"));
+  if (lines.length === 0) return text.trim();
+  if (lines.length === 1) return lines[0];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
 async function askGemini(prompt) {
 
   for (const modelName of MODEL_PRIORITY) {
@@ -62,13 +73,10 @@ client.once("ready", () => {
       const channel = await client.channels.fetch(process.env.CHANNEL_ID);
       const topic = getRandomTopic();
 
-      const prompt = `
-Viết lời chúc buổi sáng ngắn gọn, tích cực.
-Chủ đề hôm nay: ${topic}.
-Truyền động lực mạnh mẽ.
-`;
+      const prompt = `Viết ĐÚNG MỘT câu chúc buổi sáng ngắn gọn, tích cực, truyền động lực. Chủ đề: ${topic}. Chỉ trả lời bằng một câu duy nhất, không đánh số, không liệt kê.`;
 
-      const message = await askGemini(prompt);
+      const raw = await askGemini(prompt);
+      const message = pickOneLine(raw);
 
       await channel.send(`🌞 **Chào buổi sáng mọi người!**\n\n${message}`);
 
@@ -102,12 +110,10 @@ client.on("interactionCreate", async interaction => {
 
     const topic = getRandomTopic();
 
-    const prompt = `
-Viết lời chúc buổi sáng ngắn gọn, tích cực.
-Chủ đề hôm nay: ${topic}.
-`;
+    const prompt = `Viết ĐÚNG MỘT câu chúc buổi sáng ngắn gọn, tích cực, truyền động lực. Chủ đề: ${topic}. Chỉ trả lời bằng một câu duy nhất, không đánh số, không liệt kê.`;
 
-    const message = await askGemini(prompt);
+    const raw = await askGemini(prompt);
+    const message = pickOneLine(raw);
 
     await interaction.editReply(
       `🌞 Chào buổi sáng ${interaction.user}!\n\n${message}`
