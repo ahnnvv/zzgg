@@ -8,6 +8,21 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cron = require("node-cron");
 
 const EVENTS_FILE = path.join(__dirname, "events.json");
+const CONFIG_FILE = path.join(__dirname, "config.json");
+
+async function loadConfig() {
+  try {
+    const data = await fs.readFile(CONFIG_FILE, "utf8");
+    return JSON.parse(data);
+  } catch (e) {
+    if (e.code === "ENOENT") return { morningEventName: null };
+    throw e;
+  }
+}
+
+async function saveConfig(config) {
+  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+}
 
 async function loadEvents() {
   try {
@@ -172,6 +187,16 @@ client.once("ready", () => {
 
       await channel.send(`🌞 **Chào buổi sáng mọi người!**\n\n${message}`);
 
+      const config = await loadConfig();
+      const events = await loadEvents();
+      const morningName = config.morningEventName;
+      if (morningName && events[morningName]) {
+        const target = new Date(events[morningName]);
+        const countdown = getCountdown(target);
+        const text = formatCountdown(countdown);
+        const formatted = target.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
+        await channel.send(`⏳ **${morningName}**\nThời gian: ${formatted}\nCòn lại: **${text}**`);
+      }
     } catch (err) {
       console.error("Lỗi cron:", err);
     }
@@ -184,7 +209,8 @@ client.once("ready", () => {
 
 client.on("interactionCreate", async interaction => {
   if (interaction.isAutocomplete()) {
-    if (interaction.commandName === "event") {
+    const needEventList = ["event", "editevent", "deleteevent", "setmorningevent"].includes(interaction.commandName);
+    if (needEventList) {
       try {
         const events = await loadEvents();
         const names = Object.keys(events);
@@ -276,6 +302,95 @@ client.on("interactionCreate", async interaction => {
     await interaction.reply({
       content: `⏳ **${matched}**\nThời gian: ${formatted}\nCòn lại: **${text}**`
     });
+  }
+
+  if (interaction.commandName === "editevent") {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
+    }
+    const name = interaction.options.getString("name").trim();
+    const newName = interaction.options.getString("newname")?.trim();
+    const newDatetimeStr = interaction.options.getString("newdatetime")?.trim();
+    if (!newName && !newDatetimeStr) {
+      return interaction.reply({
+        content: "Cần điền ít nhất **newname** hoặc **newdatetime** để chỉnh sửa.",
+        ephemeral: true
+      });
+    }
+    const events = await loadEvents();
+    const keys = Object.keys(events);
+    const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+    if (!matched) {
+      return interaction.reply({ content: `Không tìm thấy sự kiện **${name}**.`, ephemeral: true });
+    }
+    let date = new Date(events[matched]);
+    if (newDatetimeStr) {
+      const parsed = parseEventDateTime(newDatetimeStr);
+      if (!parsed) {
+        return interaction.reply({
+          content: "Thời gian mới không hợp lệ. Dùng dạng: `31/12/2026 23:59` hoặc `2026-12-31 23:59`",
+          ephemeral: true
+        });
+      }
+      date = parsed;
+    }
+    const finalName = newName || matched;
+    if (matched !== finalName && events[finalName]) {
+      return interaction.reply({ content: `Đã tồn tại sự kiện **${finalName}**. Chọn tên khác.`, ephemeral: true });
+    }
+    delete events[matched];
+    events[finalName] = date.toISOString();
+    await saveEvents(events);
+    const config = await loadConfig();
+    if (config.morningEventName === matched) {
+      config.morningEventName = finalName;
+      await saveConfig(config);
+    }
+    const formatted = date.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
+    await interaction.reply({ content: `Đã cập nhật sự kiện thành **${finalName}** — ${formatted}.` });
+  }
+
+  if (interaction.commandName === "deleteevent") {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
+    }
+    const name = interaction.options.getString("name").trim();
+    const events = await loadEvents();
+    const keys = Object.keys(events);
+    const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+    if (!matched) {
+      return interaction.reply({ content: `Không tìm thấy sự kiện **${name}**.`, ephemeral: true });
+    }
+    delete events[matched];
+    await saveEvents(events);
+    const config = await loadConfig();
+    if (config.morningEventName === matched) {
+      config.morningEventName = null;
+      await saveConfig(config);
+    }
+    await interaction.reply({ content: `Đã xóa sự kiện **${matched}**.` });
+  }
+
+  if (interaction.commandName === "setmorningevent") {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
+    }
+    const eventName = interaction.options.getString("event")?.trim();
+    const config = await loadConfig();
+    if (!eventName) {
+      config.morningEventName = null;
+      await saveConfig(config);
+      return interaction.reply({ content: "Đã tắt countdown sự kiện lúc 7h. Chỉ còn tin nhắn chúc buổi sáng." });
+    }
+    const events = await loadEvents();
+    const keys = Object.keys(events);
+    const matched = keys.find(k => k.toLowerCase() === eventName.toLowerCase()) || keys.find(k => k.toLowerCase().includes(eventName.toLowerCase()));
+    if (!matched) {
+      return interaction.reply({ content: `Không tìm thấy sự kiện **${eventName}**. Thêm sự kiện trước bằng \`/addevent\`.` , ephemeral: true });
+    }
+    config.morningEventName = matched;
+    await saveConfig(config);
+    await interaction.reply({ content: `Mỗi 7h sẽ gửi countdown **${matched}** cùng với chúc buổi sáng.` });
   }
 });
 

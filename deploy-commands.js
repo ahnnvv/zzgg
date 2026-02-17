@@ -37,6 +37,44 @@ const commands = [
         .setDescription("Tên sự kiện cần xem (chọn từ list)")
         .setRequired(true)
         .setAutocomplete(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("editevent")
+    .setDescription("[Admin] Chỉnh sửa tên hoặc thời gian sự kiện")
+    .addStringOption(option =>
+      option.setName("name")
+        .setDescription("Sự kiện cần sửa (chọn từ list)")
+        .setRequired(true)
+        .setAutocomplete(true)
+    )
+    .addStringOption(option =>
+      option.setName("newname")
+        .setDescription("Tên mới (để trống nếu chỉ đổi giờ)")
+    )
+    .addStringOption(option =>
+      option.setName("newdatetime")
+        .setDescription("Thời gian mới (VD: 31/12/2026 23:59). Để trống nếu chỉ đổi tên)")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("deleteevent")
+    .setDescription("[Admin] Xóa một sự kiện")
+    .addStringOption(option =>
+      option.setName("name")
+        .setDescription("Sự kiện cần xóa (chọn từ list)")
+        .setRequired(true)
+        .setAutocomplete(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("setmorningevent")
+    .setDescription("[Admin] Chọn sự kiện hiển thị countdown mỗi 7h cùng chúc buổi sáng")
+    .addStringOption(option =>
+      option.setName("event")
+        .setDescription("Sự kiện (chọn từ list). Bỏ trống = tắt countdown 7h")
+        .setRequired(false)
+        .setAutocomplete(true)
     )
 ].map(cmd => cmd.toJSON());
 
