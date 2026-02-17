@@ -66,8 +66,12 @@ function getCountdown(targetDate) {
   return { years, months, days, hours, minutes, passed: false };
 }
 
+/** Trả về { text, full, short }. full: năm tháng ngày giờ phút; short: chỉ ngày và phút (trong ngoặc). */
 function formatCountdown(obj) {
-  if (obj.passed) return "Sự kiện đã qua.";
+  if (obj.passed) {
+    const t = "Sự kiện đã qua.";
+    return { text: t, full: t, short: "" };
+  }
   const parts = [];
   if (obj.years > 0) parts.push(`${obj.years} năm`);
   if (obj.months > 0) parts.push(`${obj.months} tháng`);
@@ -75,7 +79,13 @@ function formatCountdown(obj) {
   if (obj.hours > 0) parts.push(`${obj.hours} giờ`);
   if (obj.minutes > 0) parts.push(`${obj.minutes} phút`);
   if (parts.length === 0) parts.push("Sắp tới!");
-  return parts.join(" ");
+  const full = parts.join(" ");
+  const shortParts = [];
+  if (obj.days > 0) shortParts.push(`${obj.days} ngày`);
+  if (obj.minutes > 0) shortParts.push(`${obj.minutes} phút`);
+  const short = shortParts.length ? shortParts.join(" ") : full;
+  const text = short === full ? full : `${full} (${short})`;
+  return { text, full, short };
 }
 
 const client = new Client({
@@ -167,7 +177,7 @@ client.once("clientReady", async () => {
       if (morningName && events[morningName]) {
         const target = new Date(events[morningName]);
         const countdown = getCountdown(target);
-        const text = formatCountdown(countdown);
+        const { text } = formatCountdown(countdown);
         const formatted = target.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
         await channel.send(`⏳ **${morningName}**\nThời gian: ${formatted}\nCòn lại: **${text}**`);
       }
@@ -278,7 +288,7 @@ client.on("interactionCreate", async interaction => {
     }
     const target = new Date(events[matched]);
     const countdown = getCountdown(target);
-    const text = formatCountdown(countdown);
+    const { text } = formatCountdown(countdown);
     const formatted = target.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
     await interaction.reply({
       content: `⏳ **${matched}**\nThời gian: ${formatted}\nCòn lại: **${text}**`
