@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:quiet": "NODE_NO_WARNINGS=1 node index.js",
     "deploy": "node deploy-commands.js"
   },
   "dependencies": {

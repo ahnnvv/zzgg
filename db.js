@@ -69,13 +69,20 @@ async function migrateFromFiles() {
 }
 
 async function loadEvents() {
+  if (!connected) {
+    throw new Error("MongoDB chưa kết nối. Vui lòng đợi bot khởi động xong.");
+  }
   const docs = await Event.find().lean();
   const result = {};
   for (const doc of docs) result[doc.name] = new Date(doc.datetime).toISOString();
+  console.log(`Đã load ${Object.keys(result).length} sự kiện từ MongoDB.`);
   return result;
 }
 
 async function saveEvents(events) {
+  if (!connected) {
+    throw new Error("MongoDB chưa kết nối. Vui lòng đợi bot khởi động xong.");
+  }
   const names = Object.keys(events);
   await Event.deleteMany({ name: { $nin: names } });
   for (const [name, iso] of Object.entries(events)) {
@@ -85,6 +92,7 @@ async function saveEvents(events) {
       { upsert: true }
     );
   }
+  console.log(`Đã lưu ${names.length} sự kiện vào MongoDB.`);
 }
 
 async function loadConfig() {
@@ -100,11 +108,25 @@ async function saveConfig(config) {
   );
 }
 
+/** Test kết nối và đếm số events trong DB */
+async function testConnection() {
+  try {
+    if (!connected) await connect();
+    const count = await Event.countDocuments();
+    console.log(`✅ MongoDB OK. Hiện có ${count} sự kiện trong database.`);
+    return true;
+  } catch (e) {
+    console.error("❌ MongoDB test failed:", e.message);
+    return false;
+  }
+}
+
 module.exports = {
   connect,
   migrateFromFiles,
   loadEvents,
   saveEvents,
   loadConfig,
-  saveConfig
+  saveConfig,
+  testConnection
 };

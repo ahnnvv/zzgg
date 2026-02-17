@@ -151,6 +151,7 @@ client.once("clientReady", async () => {
   try {
     await db.connect();
     await db.migrateFromFiles();
+    await db.testConnection(); // Test và hiển thị số events hiện có
   } catch (err) {
     console.error("Lỗi kết nối MongoDB:", err.message);
     process.exit(1);
@@ -269,8 +270,11 @@ client.on("interactionCreate", async interaction => {
         content: `Đã thêm sự kiện **${name}** vào lúc ${formatted}. Dùng \`/event name: ${name}\` để xem countdown.`
       });
     } catch (e) {
-      console.error(e);
-      await interaction.reply({ content: "Lỗi khi lưu sự kiện.", ephemeral: true });
+      console.error("Lỗi khi lưu sự kiện:", e);
+      await interaction.reply({ 
+        content: `Lỗi khi lưu sự kiện: ${e.message}. Kiểm tra console để biết thêm chi tiết.`, 
+        ephemeral: true 
+      });
     }
   }
 
