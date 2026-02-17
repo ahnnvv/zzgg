@@ -1,8 +1,100 @@
 require("dotenv").config();
 
-const { Client, GatewayIntentBits } = require("discord.js");
+const fs = require("fs").promises;
+const path = require("path");
+
+const { Client, GatewayIntentBits, PermissionFlagsBits } = require("discord.js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cron = require("node-cron");
+
+const EVENTS_FILE = path.join(__dirname, "events.json");
+
+async function loadEvents() {
+  try {
+    const data = await fs.readFile(EVENTS_FILE, "utf8");
+    return JSON.parse(data);
+  } catch (e) {
+    if (e.code === "ENOENT") return {};
+    throw e;
+  }
+}
+
+async function saveEvents(events) {
+  await fs.writeFile(EVENTS_FILE, JSON.stringify(events, null, 2), "utf8");
+}
+
+/** Parse chuỗi ngày giờ: 31/12/2026 23:59, 2026-12-31 23:59, 2026-12-31 */
+function parseEventDateTime(str) {
+  const s = (str || "").trim();
+  let datePart, timePart = "00:00";
+  if (s.includes(" ")) {
+    const [d, t] = s.split(/\s+/, 2);
+    datePart = d;
+    timePart = t || "00:00";
+  } else {
+    datePart = s;
+  }
+  let day, month, year;
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(datePart)) {
+    const [y, m, d] = datePart.split("-").map(Number);
+    year = y; month = m; day = d;
+  } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(datePart)) {
+    const parts = datePart.split("/").map(Number);
+    day = parts[0]; month = parts[1]; year = parts[2];
+  } else {
+    return null;
+  }
+  const [h = 0, min = 0] = (timePart.match(/\d+/g) || []).map(Number);
+  const d = new Date(year, month - 1, day, h, min, 0, 0);
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
+
+/** Trả về { years, months, days, hours, minutes } còn lại đến target */
+function getCountdown(targetDate) {
+  const now = new Date();
+  if (targetDate <= now) {
+    return { years: 0, months: 0, days: 0, hours: 0, minutes: 0, passed: true };
+  }
+  let cur = new Date(now.getTime());
+  let years = 0, months = 0, days = 0, hours = 0, minutes = 0;
+
+  while (true) {
+    const next = new Date(cur.getFullYear() + 1, cur.getMonth(), cur.getDate(), cur.getHours(), cur.getMinutes());
+    if (next > targetDate) break;
+    cur = next;
+    years++;
+  }
+  while (true) {
+    const next = new Date(cur.getFullYear(), cur.getMonth() + 1, cur.getDate(), cur.getHours(), cur.getMinutes());
+    if (next > targetDate) break;
+    cur = next;
+    months++;
+  }
+  while (true) {
+    const next = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+    if (next > targetDate) break;
+    cur = next;
+    days++;
+  }
+  const ms = targetDate - cur;
+  hours = Math.floor(ms / (60 * 60 * 1000));
+  minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+
+  return { years, months, days, hours, minutes, passed: false };
+}
+
+function formatCountdown(obj) {
+  if (obj.passed) return "Sự kiện đã qua.";
+  const parts = [];
+  if (obj.years > 0) parts.push(`${obj.years} năm`);
+  if (obj.months > 0) parts.push(`${obj.months} tháng`);
+  if (obj.days > 0) parts.push(`${obj.days} ngày`);
+  if (obj.hours > 0) parts.push(`${obj.hours} giờ`);
+  if (obj.minutes > 0) parts.push(`${obj.minutes} phút`);
+  if (parts.length === 0) parts.push("Sắp tới!");
+  return parts.join(" ");
+}
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -91,6 +183,24 @@ client.once("ready", () => {
 });
 
 client.on("interactionCreate", async interaction => {
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName === "event") {
+      try {
+        const events = await loadEvents();
+        const names = Object.keys(events);
+        const focused = (interaction.options.getFocused() || "").toLowerCase();
+        const filtered = names
+          .filter(n => n.toLowerCase().includes(focused))
+          .slice(0, 25)
+          .map(name => ({ name, value: name }));
+        await interaction.respond(filtered);
+      } catch (e) {
+        await interaction.respond([]);
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === "ask") {
@@ -118,6 +228,54 @@ client.on("interactionCreate", async interaction => {
     await interaction.editReply(
       `🌞 Chào buổi sáng ${interaction.user}!\n\n${message}`
     );
+  }
+
+  if (interaction.commandName === "addevent") {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
+    }
+    const name = interaction.options.getString("name").trim();
+    const datetimeStr = interaction.options.getString("datetime");
+    const date = parseEventDateTime(datetimeStr);
+    if (!date) {
+      return interaction.reply({
+        content: "Thời gian không hợp lệ. Dùng dạng: `31/12/2026 23:59` hoặc `2026-12-31 23:59`",
+        ephemeral: true
+      });
+    }
+    try {
+      const events = await loadEvents();
+      events[name] = date.toISOString();
+      await saveEvents(events);
+      const formatted = date.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
+      await interaction.reply({
+        content: `Đã thêm sự kiện **${name}** vào lúc ${formatted}. Dùng \`/event name: ${name}\` để xem countdown.`
+      });
+    } catch (e) {
+      console.error(e);
+      await interaction.reply({ content: "Lỗi khi lưu sự kiện.", ephemeral: true });
+    }
+  }
+
+  if (interaction.commandName === "event") {
+    const name = interaction.options.getString("name").trim();
+    const events = await loadEvents();
+    const keys = Object.keys(events);
+    const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+    if (!matched) {
+      const list = keys.length ? keys.join("`, `") : "(chưa có sự kiện)";
+      return interaction.reply({
+        content: `Không tìm thấy sự kiện **${name}**. Các sự kiện hiện có: \`${list}\``,
+        ephemeral: true
+      });
+    }
+    const target = new Date(events[matched]);
+    const countdown = getCountdown(target);
+    const text = formatCountdown(countdown);
+    const formatted = target.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
+    await interaction.reply({
+      content: `⏳ **${matched}**\nThời gian: ${formatted}\nCòn lại: **${text}**`
+    });
   }
 });
 
