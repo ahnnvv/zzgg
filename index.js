@@ -217,9 +217,16 @@ client.on("interactionCreate", async interaction => {
         const focused = (interaction.options.getFocused() || "").toLowerCase();
         const filtered = names
           .filter(n => n.toLowerCase().includes(focused))
-          .slice(0, 25)
+          .slice(0, interaction.commandName === "setmorningevent" ? 24 : 25)
           .map(name => ({ name, value: name }));
-        await interaction.respond(filtered);
+        if (interaction.commandName === "setmorningevent") {
+          const clearChoice = { name: "— Tắt countdown 7h —", value: "__clear__" };
+          const matchesClear = focused === "" || "tắt".includes(focused) || "clear".includes(focused);
+          const list = matchesClear ? [clearChoice, ...filtered] : (filtered.length ? filtered : [clearChoice]);
+          await interaction.respond(list);
+        } else {
+          await interaction.respond(filtered);
+        }
       } catch (e) {
         await interaction.respond([]);
       }
@@ -377,7 +384,7 @@ client.on("interactionCreate", async interaction => {
     }
     const eventName = interaction.options.getString("event")?.trim();
     const config = await loadConfig();
-    if (!eventName) {
+    if (!eventName || eventName === "__clear__") {
       config.morningEventName = null;
       await saveConfig(config);
       return interaction.reply({ content: "Đã tắt countdown sự kiện lúc 7h. Chỉ còn tin nhắn chúc buổi sáng." });

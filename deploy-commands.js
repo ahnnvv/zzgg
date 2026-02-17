@@ -72,8 +72,8 @@ const commands = [
     .setDescription("[Admin] Chọn sự kiện hiển thị countdown mỗi 7h cùng chúc buổi sáng")
     .addStringOption(option =>
       option.setName("event")
-        .setDescription("Sự kiện (chọn từ list). Bỏ trống = tắt countdown 7h")
-        .setRequired(false)
+        .setDescription("Sự kiện (chọn từ list). Chọn \"Tắt\" để tắt countdown 7h")
+        .setRequired(true)
         .setAutocomplete(true)
     )
 ].map(cmd => cmd.toJSON());
