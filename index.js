@@ -1,42 +1,9 @@
 require("dotenv").config();
 
-const fs = require("fs").promises;
-const path = require("path");
-
 const { Client, GatewayIntentBits, PermissionFlagsBits } = require("discord.js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cron = require("node-cron");
-
-const EVENTS_FILE = path.join(__dirname, "events.json");
-const CONFIG_FILE = path.join(__dirname, "config.json");
-
-async function loadConfig() {
-  try {
-    const data = await fs.readFile(CONFIG_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (e) {
-    if (e.code === "ENOENT") return { morningEventName: null };
-    throw e;
-  }
-}
-
-async function saveConfig(config) {
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
-}
-
-async function loadEvents() {
-  try {
-    const data = await fs.readFile(EVENTS_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (e) {
-    if (e.code === "ENOENT") return {};
-    throw e;
-  }
-}
-
-async function saveEvents(events) {
-  await fs.writeFile(EVENTS_FILE, JSON.stringify(events, null, 2), "utf8");
-}
+const db = require("./db");
 
 /** Parse chuỗi ngày giờ: 31/12/2026 23:59, 2026-12-31 23:59, 2026-12-31 */
 function parseEventDateTime(str) {
@@ -170,7 +137,14 @@ async function askGemini(prompt) {
   return "⚠ AI hiện không khả dụng. Thử lại sau nhé!";
 }
 
-client.once("ready", () => {
+client.once("ready", async () => {
+  try {
+    await db.connect();
+    await db.migrateFromFiles();
+  } catch (err) {
+    console.error("Lỗi kết nối MongoDB:", err.message);
+    process.exit(1);
+  }
   console.log(`Bot online: ${client.user.tag}`);
 
   cron.schedule(process.env.CRON_SCHEDULE || "0 7 * * *", async () => {
@@ -187,8 +161,8 @@ client.once("ready", () => {
 
       await channel.send(`🌞 **Chào buổi sáng mọi người!**\n\n${message}`);
 
-      const config = await loadConfig();
-      const events = await loadEvents();
+      const config = await db.loadConfig();
+      const events = await db.loadEvents();
       const morningName = config.morningEventName;
       if (morningName && events[morningName]) {
         const target = new Date(events[morningName]);
@@ -212,7 +186,7 @@ client.on("interactionCreate", async interaction => {
     const needEventList = ["event", "editevent", "deleteevent", "setmorningevent"].includes(interaction.commandName);
     if (needEventList) {
       try {
-        const events = await loadEvents();
+        const events = await db.loadEvents();
         const names = Object.keys(events);
         const focused = (interaction.options.getFocused() || "").toLowerCase();
         const filtered = names
@@ -277,9 +251,9 @@ client.on("interactionCreate", async interaction => {
       });
     }
     try {
-      const events = await loadEvents();
+      const events = await db.loadEvents();
       events[name] = date.toISOString();
-      await saveEvents(events);
+      await db.saveEvents(events);
       const formatted = date.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
       await interaction.reply({
         content: `Đã thêm sự kiện **${name}** vào lúc ${formatted}. Dùng \`/event name: ${name}\` để xem countdown.`
@@ -292,7 +266,7 @@ client.on("interactionCreate", async interaction => {
 
   if (interaction.commandName === "event") {
     const name = interaction.options.getString("name").trim();
-    const events = await loadEvents();
+    const events = await db.loadEvents();
     const keys = Object.keys(events);
     const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
     if (!matched) {
@@ -324,7 +298,7 @@ client.on("interactionCreate", async interaction => {
         ephemeral: true
       });
     }
-    const events = await loadEvents();
+    const events = await db.loadEvents();
     const keys = Object.keys(events);
     const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
     if (!matched) {
@@ -347,11 +321,11 @@ client.on("interactionCreate", async interaction => {
     }
     delete events[matched];
     events[finalName] = date.toISOString();
-    await saveEvents(events);
-    const config = await loadConfig();
+    await db.saveEvents(events);
+    const config = await db.loadConfig();
     if (config.morningEventName === matched) {
       config.morningEventName = finalName;
-      await saveConfig(config);
+      await db.saveConfig(config);
     }
     const formatted = date.toLocaleString("vi-VN", { dateStyle: "long", timeStyle: "short" });
     await interaction.reply({ content: `Đã cập nhật sự kiện thành **${finalName}** — ${formatted}.` });
@@ -362,18 +336,18 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
     }
     const name = interaction.options.getString("name").trim();
-    const events = await loadEvents();
+    const events = await db.loadEvents();
     const keys = Object.keys(events);
     const matched = keys.find(k => k.toLowerCase() === name.toLowerCase()) || keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
     if (!matched) {
       return interaction.reply({ content: `Không tìm thấy sự kiện **${name}**.`, ephemeral: true });
     }
     delete events[matched];
-    await saveEvents(events);
-    const config = await loadConfig();
+    await db.saveEvents(events);
+    const config = await db.loadConfig();
     if (config.morningEventName === matched) {
       config.morningEventName = null;
-      await saveConfig(config);
+      await db.saveConfig(config);
     }
     await interaction.reply({ content: `Đã xóa sự kiện **${matched}**.` });
   }
@@ -383,20 +357,20 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: "Chỉ admin mới dùng được lệnh này.", ephemeral: true });
     }
     const eventName = interaction.options.getString("event")?.trim();
-    const config = await loadConfig();
+    const config = await db.loadConfig();
     if (!eventName || eventName === "__clear__") {
       config.morningEventName = null;
-      await saveConfig(config);
+      await db.saveConfig(config);
       return interaction.reply({ content: "Đã tắt countdown sự kiện lúc 7h. Chỉ còn tin nhắn chúc buổi sáng." });
     }
-    const events = await loadEvents();
+    const events = await db.loadEvents();
     const keys = Object.keys(events);
     const matched = keys.find(k => k.toLowerCase() === eventName.toLowerCase()) || keys.find(k => k.toLowerCase().includes(eventName.toLowerCase()));
     if (!matched) {
       return interaction.reply({ content: `Không tìm thấy sự kiện **${eventName}**. Thêm sự kiện trước bằng \`/addevent\`.` , ephemeral: true });
     }
     config.morningEventName = matched;
-    await saveConfig(config);
+    await db.saveConfig(config);
     await interaction.reply({ content: `Mỗi 7h sẽ gửi countdown **${matched}** cùng với chúc buổi sáng.` });
   }
 });
