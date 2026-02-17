@@ -137,7 +137,7 @@ async function askGemini(prompt) {
   return "⚠ AI hiện không khả dụng. Thử lại sau nhé!";
 }
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   try {
     await db.connect();
     await db.migrateFromFiles();
